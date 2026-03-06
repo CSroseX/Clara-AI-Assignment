@@ -1,0 +1,211 @@
+{
+  "name": "Clara Pipeline A — Demo Call to Agent v1",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "notes": "Click 'Test workflow' to start Pipeline A. In production, swap this for a Watch Folder node."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "dataset_path",
+              "value": "/data/dataset/demo"
+            },
+            {
+              "name": "scripts_path",
+              "value": "/data/scripts"
+            },
+            {
+              "name": "pipeline",
+              "value": "a"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [460, 300],
+      "notes": "Set paths to your dataset and scripts. Adjust dataset_path if your folder is in a different location."
+    },
+    {
+      "parameters": {
+        "command": "find {{ $json.dataset_path }} -name '*.txt' | sort"
+      },
+      "id": "a1b2c3d4-0003-0003-0003-000000000003",
+      "name": "List Demo Files",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "notes": "Lists all .txt transcript files in the demo folder. Output is a newline-separated list of file paths."
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "stdout",
+        "options": {
+          "destinationFieldName": "filepath",
+          "disableDotNotation": false,
+          "include": "noOtherFields"
+        }
+      },
+      "id": "a1b2c3d4-0004-0004-0004-000000000004",
+      "name": "Split File List",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "notes": "Splits the newline-separated file list into individual items. Each item downstream = one transcript file."
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.filepath;\nif (!raw || raw.trim() === '') {\n  return [];\n}\nconst lines = raw.split('\\n').map(l => l.trim()).filter(l => l.length > 0);\nreturn lines.map(line => ({ json: { filepath: line } }));"
+      },
+      "id": "a1b2c3d4-0005-0005-0005-000000000005",
+      "name": "Clean File Paths",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300],
+      "notes": "Cleans up the file path strings and filters out any empty lines from the find command output."
+    },
+    {
+      "parameters": {
+        "command": "cd /data && python scripts/run_single.py --file \"{{ $json.filepath }}\" --pipeline a 2>&1"
+      },
+      "id": "a1b2c3d4-0006-0006-0006-000000000006",
+      "name": "Run Pipeline A (per file)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1340, 300],
+      "notes": "Runs your Python pipeline for one transcript file. Calls normalize → extract → prompt_generator → write_outputs → supabase → github."
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $json.stdout || '';\nconst stderr = $json.stderr || '';\nconst exitCode = $json.exitCode;\n\nconst accountMatch = stdout.match(/account_id:\\s*([\\w_]+)/);\nconst companyMatch = stdout.match(/company:\\s*(.+)/);\nconst issueMatch = stdout.match(/issue_url:\\s*(https:\\/\\/[^\\s]+)/);\n\nreturn [{\n  json: {\n    filepath: $json.filepath,\n    status: exitCode === 0 ? 'success' : 'error',\n    account_id: accountMatch ? accountMatch[1] : 'unknown',\n    company_name: companyMatch ? companyMatch[1].trim() : 'unknown',\n    issue_url: issueMatch ? issueMatch[1] : null,\n    stdout: stdout,\n    stderr: stderr,\n    exit_code: exitCode\n  }\n}];"
+      },
+      "id": "a1b2c3d4-0007-0007-0007-000000000007",
+      "name": "Parse Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300],
+      "notes": "Parses the Python script stdout to extract account_id, company name, and GitHub issue URL for logging."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-success",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "success",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0008-0008-0008-000000000008",
+      "name": "Success or Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 300],
+      "notes": "Routes to success path (true) or error logging path (false) based on Python script exit code."
+    },
+    {
+      "parameters": {
+        "jsCode": "// SUCCESS: log to console and pass through\nconst item = $json;\nconsole.log(`✓ [Pipeline A] ${item.account_id} | ${item.company_name} | ${item.issue_url}`);\nreturn [{ json: { ...item, logged_at: new Date().toISOString() } }];"
+      },
+      "id": "a1b2c3d4-0009-0009-0009-000000000009",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 180],
+      "notes": "Logs successful processing. In production, you could send a Slack message or email here."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ERROR: append to error log file\nconst item = $json;\nconst fs = require('fs');\nconst logPath = '/data/logs/errors.jsonl';\nconst entry = JSON.stringify({\n  timestamp: new Date().toISOString(),\n  pipeline: 'A',\n  filepath: item.filepath,\n  account_id: item.account_id,\n  exit_code: item.exit_code,\n  stderr: item.stderr,\n  stdout: item.stdout\n}) + '\\n';\ntry {\n  fs.mkdirSync('/data/logs', { recursive: true });\n  fs.appendFileSync(logPath, entry);\n} catch(e) {\n  console.error('Could not write error log:', e.message);\n}\nconsole.error(`✗ [Pipeline A ERROR] ${item.filepath}: ${item.stderr}`);\nreturn [{ json: { ...item, error_logged: true } }];"
+      },
+      "id": "a1b2c3d4-0010-0010-0010-000000000010",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 420],
+      "notes": "Appends error details to /data/logs/errors.jsonl. Does NOT stop the workflow — other files continue processing."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all results and print batch summary\nconst allItems = $input.all();\nconst total = allItems.length;\nconst succeeded = allItems.filter(i => i.json.status === 'success').length;\nconst failed = total - succeeded;\n\nconsole.log(`\\n${'='.repeat(50)}`);\nconsole.log(`PIPELINE A COMPLETE: ${succeeded}/${total} succeeded, ${failed} failed`);\nallItems.forEach(item => {\n  const icon = item.json.status === 'success' ? '✓' : '✗';\n  console.log(`  ${icon} ${item.json.account_id || item.json.filepath}`);\n});\nconsole.log('='.repeat(50));\n\nreturn [{\n  json: {\n    pipeline: 'A',\n    total,\n    succeeded,\n    failed,\n    completed_at: new Date().toISOString(),\n    accounts: allItems.map(i => i.json.account_id)\n  }\n}];"
+      },
+      "id": "a1b2c3d4-0011-0011-0011-000000000011",
+      "name": "Batch Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 300],
+      "notes": "Aggregates results from all files and prints a final summary. This node runs after all files are processed."
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Set Config", "type": "main", "index": 0 }]]
+    },
+    "Set Config": {
+      "main": [[{ "node": "List Demo Files", "type": "main", "index": 0 }]]
+    },
+    "List Demo Files": {
+      "main": [[{ "node": "Split File List", "type": "main", "index": 0 }]]
+    },
+    "Split File List": {
+      "main": [[{ "node": "Clean File Paths", "type": "main", "index": 0 }]]
+    },
+    "Clean File Paths": {
+      "main": [[{ "node": "Run Pipeline A (per file)", "type": "main", "index": 0 }]]
+    },
+    "Run Pipeline A (per file)": {
+      "main": [[{ "node": "Parse Result", "type": "main", "index": 0 }]]
+    },
+    "Parse Result": {
+      "main": [[{ "node": "Success or Error?", "type": "main", "index": 0 }]]
+    },
+    "Success or Error?": {
+      "main": [
+        [{ "node": "Log Success", "type": "main", "index": 0 }],
+        [{ "node": "Log Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Success": {
+      "main": [[{ "node": "Batch Summary", "type": "main", "index": 0 }]]
+    },
+    "Log Error": {
+      "main": [[{ "node": "Batch Summary", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [{ "name": "clara-pipeline" }, { "name": "pipeline-a" }],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-15T00:00:00.000Z",
+  "versionId": "clara-v1"
+}

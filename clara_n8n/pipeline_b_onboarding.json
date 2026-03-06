@@ -1,0 +1,279 @@
+{
+  "name": "Clara Pipeline B — Onboarding to Agent v2",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "notes": "Click 'Test workflow' to run Pipeline B. Run this AFTER Pipeline A has completed for all 5 demo accounts."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "dataset_path",
+              "value": "/data/dataset/onboarding"
+            },
+            {
+              "name": "scripts_path",
+              "value": "/data/scripts"
+            },
+            {
+              "name": "outputs_path",
+              "value": "/data/outputs/accounts"
+            },
+            {
+              "name": "pipeline",
+              "value": "b"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [460, 300],
+      "notes": "Configure paths. outputs_path must point to where Pipeline A wrote v1 files."
+    },
+    {
+      "parameters": {
+        "command": "find {{ $json.dataset_path }} -name '*.txt' | sort"
+      },
+      "id": "b1b2c3d4-0003-0003-0003-000000000003",
+      "name": "List Onboarding Files",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "notes": "Lists all onboarding transcript files. These must be named to match demo files (e.g. onboarding_001.txt pairs with demo_001.txt)."
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "stdout",
+        "options": {
+          "destinationFieldName": "filepath",
+          "disableDotNotation": false,
+          "include": "noOtherFields"
+        }
+      },
+      "id": "b1b2c3d4-0004-0004-0004-000000000004",
+      "name": "Split File List",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "notes": "Splits the file list into individual items for per-file processing."
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.filepath;\nif (!raw || raw.trim() === '') {\n  return [];\n}\nconst lines = raw.split('\\n').map(l => l.trim()).filter(l => l.length > 0);\nreturn lines.map(line => {\n  // Derive the matching demo account_id from onboarding filename\n  const filename = line.split('/').pop().replace('.txt', '');\n  const accountId = filename.replace('onboarding_', 'demo_');\n  return {\n    json: {\n      filepath: line,\n      onboarding_filename: filename,\n      account_id: accountId\n    }\n  };\n});"
+      },
+      "id": "b1b2c3d4-0005-0005-0005-000000000005",
+      "name": "Map to Account IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300],
+      "notes": "Derives the matching demo account_id from each onboarding filename. onboarding_001.txt → account_id: demo_001."
+    },
+    {
+      "parameters": {
+        "command": "test -f /data/outputs/accounts/{{ $json.account_id }}/v1/account_memo.json && echo 'EXISTS' || echo 'MISSING'"
+      },
+      "id": "b1b2c3d4-0006-0006-0006-000000000006",
+      "name": "Check v1 Exists",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1340, 300],
+      "notes": "Verifies that Pipeline A has already created v1 for this account. If MISSING, the error path is taken."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-exists",
+              "leftValue": "={{ $json.stdout.trim() }}",
+              "rightValue": "EXISTS",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1b2c3d4-0007-0007-0007-000000000007",
+      "name": "v1 Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1560, 300],
+      "notes": "Only proceed with onboarding if v1 exists. True = run Pipeline B. False = log that demo must run first."
+    },
+    {
+      "parameters": {
+        "command": "cd /data && python scripts/run_single.py --file \"{{ $json.filepath }}\" --pipeline b --account-id \"{{ $json.account_id }}\" 2>&1"
+      },
+      "id": "b1b2c3d4-0008-0008-0008-000000000008",
+      "name": "Run Pipeline B (per file)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1780, 180],
+      "notes": "Runs your Python patch pipeline: normalize → extract updates → apply_patch → generate v2 agent spec → write_outputs → supabase update → changelog."
+    },
+    {
+      "parameters": {
+        "jsCode": "// v1 MISSING: log warning, continue to next file\nconst item = $json;\nconst warning = `⚠️ [Pipeline B] No v1 found for ${item.account_id}. Run Pipeline A first.`;\nconsole.warn(warning);\nreturn [{\n  json: {\n    account_id: item.account_id,\n    filepath: item.filepath,\n    status: 'skipped',\n    reason: 'v1_not_found',\n    message: warning\n  }\n}];"
+      },
+      "id": "b1b2c3d4-0009-0009-0009-000000000009",
+      "name": "Log v1 Missing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 420],
+      "notes": "If v1 is missing, log a warning and skip this file. The workflow continues with the next onboarding file."
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $json.stdout || '';\nconst stderr = $json.stderr || '';\nconst exitCode = $json.exitCode;\n\nconst changesMatch = stdout.match(/changes_count:\\s*(\\d+)/);\nconst accountMatch = stdout.match(/account_id:\\s*([\\w_]+)/);\n\nreturn [{\n  json: {\n    filepath: $json.filepath,\n    account_id: accountMatch ? accountMatch[1] : $json.account_id,\n    status: exitCode === 0 ? 'success' : 'error',\n    changes_count: changesMatch ? parseInt(changesMatch[1]) : 0,\n    stdout: stdout,\n    stderr: stderr,\n    exit_code: exitCode\n  }\n}];"
+      },
+      "id": "b1b2c3d4-0010-0010-0010-000000000010",
+      "name": "Parse v2 Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 180],
+      "notes": "Parses the Python output to get account_id, status, and how many fields changed (for the summary)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-success",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "success",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1b2c3d4-0011-0011-0011-000000000011",
+      "name": "Success or Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2220, 180],
+      "notes": "Routes to success logging or error logging based on Python exit code."
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $json;\nconsole.log(`✓ [Pipeline B] ${item.account_id} → v2 complete | ${item.changes_count} fields updated`);\nreturn [{ json: { ...item, logged_at: new Date().toISOString() } }];"
+      },
+      "id": "b1b2c3d4-0012-0012-0012-000000000012",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 80],
+      "notes": "Logs the successful v2 update including how many fields were changed from v1."
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $json;\nconst fs = require('fs');\nconst logPath = '/data/logs/errors.jsonl';\nconst entry = JSON.stringify({\n  timestamp: new Date().toISOString(),\n  pipeline: 'B',\n  filepath: item.filepath,\n  account_id: item.account_id,\n  exit_code: item.exit_code,\n  stderr: item.stderr\n}) + '\\n';\ntry {\n  fs.mkdirSync('/data/logs', { recursive: true });\n  fs.appendFileSync(logPath, entry);\n} catch(e) {\n  console.error('Could not write error log:', e.message);\n}\nconsole.error(`✗ [Pipeline B ERROR] ${item.account_id}: ${item.stderr}`);\nreturn [{ json: { ...item, error_logged: true, status: 'error' } }];"
+      },
+      "id": "b1b2c3d4-0013-0013-0013-000000000013",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 280],
+      "notes": "Appends error details to errors.jsonl. Does not halt workflow — remaining files continue."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect ALL results (success + error + skipped) for final summary\nconst allItems = $input.all();\nconst total = allItems.length;\nconst succeeded = allItems.filter(i => i.json.status === 'success').length;\nconst skipped = allItems.filter(i => i.json.status === 'skipped').length;\nconst failed = allItems.filter(i => i.json.status === 'error').length;\nconst totalChanges = allItems.reduce((sum, i) => sum + (i.json.changes_count || 0), 0);\n\nconsole.log(`\\n${'='.repeat(50)}`);\nconsole.log(`PIPELINE B COMPLETE`);\nconsole.log(`  Succeeded: ${succeeded}/${total}`);\nconsole.log(`  Skipped (no v1): ${skipped}`);\nconsole.log(`  Failed: ${failed}`);\nconsole.log(`  Total field changes: ${totalChanges}`);\nallItems.forEach(item => {\n  const icon = item.json.status === 'success' ? '✓' : item.json.status === 'skipped' ? '⚠' : '✗';\n  console.log(`  ${icon} ${item.json.account_id} | changes: ${item.json.changes_count || 0}`);\n});\nconsole.log('='.repeat(50));\n\nreturn [{\n  json: {\n    pipeline: 'B',\n    total,\n    succeeded,\n    skipped,\n    failed,\n    total_field_changes: totalChanges,\n    completed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "b1b2c3d4-0014-0014-0014-000000000014",
+      "name": "Batch Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 300],
+      "notes": "Final summary node. Shows how many accounts upgraded to v2, how many were skipped or failed."
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Set Config", "type": "main", "index": 0 }]]
+    },
+    "Set Config": {
+      "main": [[{ "node": "List Onboarding Files", "type": "main", "index": 0 }]]
+    },
+    "List Onboarding Files": {
+      "main": [[{ "node": "Split File List", "type": "main", "index": 0 }]]
+    },
+    "Split File List": {
+      "main": [[{ "node": "Map to Account IDs", "type": "main", "index": 0 }]]
+    },
+    "Map to Account IDs": {
+      "main": [[{ "node": "Check v1 Exists", "type": "main", "index": 0 }]]
+    },
+    "Check v1 Exists": {
+      "main": [[{ "node": "v1 Found?", "type": "main", "index": 0 }]]
+    },
+    "v1 Found?": {
+      "main": [
+        [{ "node": "Run Pipeline B (per file)", "type": "main", "index": 0 }],
+        [{ "node": "Log v1 Missing", "type": "main", "index": 0 }]
+      ]
+    },
+    "Run Pipeline B (per file)": {
+      "main": [[{ "node": "Parse v2 Result", "type": "main", "index": 0 }]]
+    },
+    "Parse v2 Result": {
+      "main": [[{ "node": "Success or Error?", "type": "main", "index": 0 }]]
+    },
+    "Success or Error?": {
+      "main": [
+        [{ "node": "Log Success", "type": "main", "index": 0 }],
+        [{ "node": "Log Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Success": {
+      "main": [[{ "node": "Batch Summary", "type": "main", "index": 0 }]]
+    },
+    "Log Error": {
+      "main": [[{ "node": "Batch Summary", "type": "main", "index": 0 }]]
+    },
+    "Log v1 Missing": {
+      "main": [[{ "node": "Batch Summary", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [{ "name": "clara-pipeline" }, { "name": "pipeline-b" }],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-15T00:00:00.000Z",
+  "versionId": "clara-v1"
+}
