@@ -42,9 +42,7 @@ SUPABASE_KEY= # Supabase anon key
 GITHUB_TOKEN= # GitHub personal access token
 GITHUB_REPO= # your-username/clara-pipeline
 ## Known Limitations
-- Retell agent creation is via spec JSON only (manual import if API not free)
-- Audio transcription requires local Whisper install (transcripts = primary input)
-- GitHub Issues used instead of Asana (both satisfy tracking requirement)
+- The product is currently a partial implementation, and several requirements remain unmet due to time constraints. However, if given **considerable time** for a project of this scale, I am confident that it can be expanded into a complete and fully functional solution that satisfies all the specified requirements.
 ## What I Would Improve With Production Access
 - Retell API integration for programmatic agent creation
 - Webhook-triggered ingestion instead of file watch
